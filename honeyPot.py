@@ -3,6 +3,8 @@ import sys
 import json
 import requests
 import ast
+import gevent
+import logging
 from lxml import etree
 from configparser import ConfigParser
 from requests.exceptions import Timeout, ConnectionError
@@ -14,6 +16,7 @@ root_template_dir = "./protocols/"
 root_xsd = "./core.xsd"
 root_config = "./testing.cfg"
 config = ConfigParser(os.environ)
+logger = logging.getLogger()
 
 def validate_template(xml_file, xsd_file):
     xml_schema = etree.parse(xsd_file)
@@ -39,6 +42,10 @@ def _fetch_data(urls):
         except (Timeout, ConnectionError):
             print('Could not fetch public ip')
     return None
+
+def on_unhandled_greenlet_exception(dead_greenlet):
+    logger.error('Stopping because %s died: %s', dead_greenlet, dead_greenlet.exception)
+    sys.exit(1)
 
 def get_ext_ip(config=None, urls=None):
     if config:
@@ -100,8 +107,9 @@ def main():
                     port = ast.literal_eval(dom_protocol.xpath('//{0}/@port'.format(protocol_name))[0])
                     server = server_class(protocol_template, root_template_dir)
                     greenlet = gevent.spawn(server.start, host, port)
-                    greenlet.link_exception()
+                    greenlet.link_exception(on_unhandled_greenlet_exception)
                     servers.append(server)
+                    logger.info('Found and enabled %s protocol.', (protocol[0], server))
         # protocol_template = 
     
 if __name__ == "__main__":
