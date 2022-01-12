@@ -111,7 +111,58 @@ def main():
                     servers.append(server)
                     logger.info('Found and enabled %s protocol.', (protocol[0], server))
         # protocol_template = 
+            else:
+                logger.info('%s available but disabled by configuration.' , protocol_name)
+        else:
+            logger.debug('No %s template found. Service will remain stopped', protocol_name)
     
+    log_worker = log_worker(config, dom_base, session_manager, public_ip)
+    greenlet = gevent.spawn(log_worker.start)
+    green.link_exception(on_unhandled_greenlet_exception)
+
+    template_proxy = os.path.join(root_template_dir, 'proxy', 'proxy.xml')
+    if os.path.isfile(template_proxy):
+        xsd_file = os.path.join('./emulators/', 'proxy.xsd')
+        validate_template(template_proxy, xsd_file)
+        dom_proxy = etree.parse(template_proxy)
+        if dom_proxy.xpath('//proxies'):
+            if ast.literal_eval(dom_proxy.xpath('//proxies/@enabled')[0]):
+                proxies = dom_proxy.xpath('//proxies/*')
+                for p in proxies:
+                    name = p.attrib['name']
+                    host = p.attrib['host']
+                    keyfile = None
+                    certfile = None
+                    if 'keyfile' in p.attrib and 'certfile' in p.attrib:
+                        keyfile = p.attrib['keyfile']
+                        certfile = p.attrib['certfile']
+
+                        # if path is absolute we assert that the cert and key is located in
+                        # the templates ssl standard location
+
+                        if not os.path.isabs(keyfile):
+                            keyfile = os.path.join(os.path.dirname(root_template_dir), 'ssl', keyfile)
+                            certfile = os.path.join(os.path.dirname(root_template_dir), 'ssl', certfile)
+                    port = ast.literal_eval(p.attrib['port'])
+                    proxy_host = p.xpath('./proxy_host/text()')[0]
+                    proxy_port = ast.literal_eval(p.xpath('./proxy_port/text()')[0])
+                    decoder = p.xpath('./decoder/text()')
+                    if len(decoder) > 0:
+                        decoder = decoder[0]
+                    else:
+                        decoder = None
+                    proxy_instance = Proxy(name, proxy_host, proxy_port, decoder, keyfile, certfile)
+                    proxy_server = proxy_instance.get_server(host, port)
+                    servers.append(proxy_instance)
+                    proxy_greenlet = gevent.spawn(proxy_server.start)
+                    proxy_greenlet.link_exception(on_unhandled_greenlet_exception)
+            else:
+                logger.info('Proxy available but disabled by the template')
+    else:
+        logger.info('No proxy template found. Service will remain unconfigured')
+    
+    gevent.sleep(5)
+
 if __name__ == "__main__":
     
     main()
